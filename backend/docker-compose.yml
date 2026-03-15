@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: stayease-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: stayease_booking
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Booking Service
+  booking-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stayease-booking-service
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      MONGODB_URI: mongodb://admin:password@mongodb:27017/stayease_booking?authSource=admin
+      MONGODB_DB_NAME: stayease_booking
+      AUTH_SERVICE_URL: http://auth-service:3001
+      HOTEL_SERVICE_URL: http://hotel-service:3002
+      PAYMENT_SERVICE_URL: http://payment-service:3004
+      JWT_SECRET: your_super_secret_jwt_key_change_this_in_production
+      LOG_LEVEL: debug
+      CORS_ORIGIN: http://localhost:3000,http://localhost:5173,http://localhost:3003
+      REQUEST_TIMEOUT: 30000
+    ports:
+      - "3003:3000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    networks:
+      - stayease-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Mongo Express for database management
+  mongo-express:
+    image: mongo-express:latest
+    container_name: stayease-mongo-express
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: password
+      ME_CONFIG_MONGODB_URL: mongodb://admin:password@mongodb:27017/
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mongodb
+    networks:
+      - stayease-network
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  stayease-network:
+    driver: bridge
