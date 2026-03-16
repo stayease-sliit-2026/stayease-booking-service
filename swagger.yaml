@@ -1,0 +1,477 @@
+openapi: 3.0.0
+info:
+  title: StayEase Booking Service API
+  description: Microservice for managing hotel bookings in the StayEase system
+  version: 1.0.0
+  contact:
+    name: StayEase Support
+    email: support@stayease.com
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3003
+    description: Local Development Server
+  - url: https://api.stayease.com/bookings
+    description: Production Server
+
+tags:
+  - name: Bookings
+    description: Booking management endpoints
+  - name: Availability
+    description: Room availability checking
+
+paths:
+  /bookings:
+    post:
+      tags:
+        - Bookings
+      summary: Create a new booking
+      description: Creates a new booking and initiates payment process
+      operationId: createBooking
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+      responses:
+        '201':
+          description: Booking created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: Room not available for selected dates
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /bookings/{id}:
+    get:
+      tags:
+        - Bookings
+      summary: Get booking by ID
+      description: Retrieve a specific booking by its ID
+      operationId: getBooking
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200':
+          description: Booking retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden - Not authorized to access this booking
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /bookings/user/:
+    get:
+      tags:
+        - Bookings
+      summary: Get all user bookings
+      description: Retrieve all bookings for the authenticated user
+      operationId: getUserBookings
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter by booking status
+          schema:
+            type: string
+            enum: [pending, confirmed, cancelled]
+        - name: hotelId
+          in: query
+          description: Filter by hotel ID
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Number of results to return
+          schema:
+            type: integer
+            default: 10
+        - name: skip
+          in: query
+          description: Number of results to skip (for pagination)
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: User bookings retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /bookings/{id}/confirm:
+    put:
+      tags:
+        - Bookings
+      summary: Confirm a booking
+      description: Confirm a booking after successful payment
+      operationId: confirmBooking
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200':
+          description: Booking confirmed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+        '400':
+          description: Cannot confirm booking (invalid status or payment not complete)
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden - Not authorized to confirm this booking
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /bookings/{id}/cancel:
+    put:
+      tags:
+        - Bookings
+      summary: Cancel a booking
+      description: Cancel an existing booking and process refund if applicable
+      operationId: cancelBooking
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Reason for cancellation
+      responses:
+        '200':
+          description: Booking cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+        '400':
+          description: Cannot cancel booking (already cancelled)
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden - Not authorized to cancel this booking
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /bookings/availability:
+    get:
+      tags:
+        - Availability
+      summary: Check room availability
+      description: Check if a room is available for the specified dates
+      operationId: checkAvailability
+      parameters:
+        - name: hotelId
+          in: query
+          required: true
+          description: Hotel ID
+          schema:
+            type: string
+        - name: roomId
+          in: query
+          required: true
+          description: Room ID
+          schema:
+            type: string
+        - name: checkIn
+          in: query
+          required: true
+          description: Check-in date (ISO8601 format)
+          schema:
+            type: string
+            format: date-time
+        - name: checkOut
+          in: query
+          required: true
+          description: Check-out date (ISO8601 format)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Availability check successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      available:
+                        type: boolean
+                      roomId:
+                        type: string
+                      pricePerNight:
+                        type: number
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /bookings/user/stats:
+    get:
+      tags:
+        - Bookings
+      summary: Get booking statistics
+      description: Get statistical summary of bookings for the authenticated user
+      operationId: getBookingStats
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        _id:
+                          type: string
+                        count:
+                          type: integer
+                        totalSpent:
+                          type: number
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from Auth Service
+
+  schemas:
+    CreateBookingRequest:
+      type: object
+      required:
+        - hotelId
+        - roomId
+        - checkIn
+        - checkOut
+        - numberOfGuests
+        - totalPrice
+      properties:
+        hotelId:
+          type: string
+          description: ID of the hotel
+        roomId:
+          type: string
+          description: ID of the room
+        checkIn:
+          type: string
+          format: date-time
+          description: Check-in date (ISO8601 format)
+        checkOut:
+          type: string
+          format: date-time
+          description: Check-out date (ISO8601 format)
+        numberOfGuests:
+          type: integer
+          minimum: 1
+          description: Number of guests
+        totalPrice:
+          type: number
+          minimum: 0
+          description: Total price for the booking
+        roomType:
+          type: string
+          description: Type of room (optional)
+        specialRequests:
+          type: string
+          description: Special requests or notes (optional)
+
+    Booking:
+      type: object
+      properties:
+        _id:
+          type: string
+          description: Booking ID
+        userId:
+          type: string
+          description: User ID who made the booking
+        hotelId:
+          type: string
+          description: Hotel ID
+        roomId:
+          type: string
+          description: Room ID
+        checkIn:
+          type: string
+          format: date-time
+          description: Check-in date
+        checkOut:
+          type: string
+          format: date-time
+          description: Check-out date
+        status:
+          type: string
+          enum: [pending, confirmed, cancelled]
+          description: Booking status
+        totalPrice:
+          type: number
+          description: Total price
+        numberOfGuests:
+          type: integer
+          description: Number of guests
+        roomType:
+          type: string
+          description: Room type
+        specialRequests:
+          type: string
+          description: Special requests
+        paymentId:
+          type: string
+          description: Payment ID
+        paymentStatus:
+          type: string
+          enum: [pending, success, failed, refunded]
+          description: Payment status
+        cancellationReason:
+          type: string
+          description: Reason for cancellation (if cancelled)
+        cancellationDate:
+          type: string
+          format: date-time
+          description: Date of cancellation
+        createdAt:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    BookingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/Booking'
+
+    BookingListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Booking'
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+            limit:
+              type: integer
+            skip:
+              type: integer
+            hasMore:
+              type: boolean
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          example: true
+        message:
+          type: string
+        details:
+          type: string
+
+  parameters:
+    BookingId:
+      name: id
+      in: path
+      required: true
+      description: Booking ID (MongoDB ObjectID)
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{24}$'
+
+  responses:
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    UnauthorizedError:
+      description: Unauthorized - Invalid or missing JWT token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    ServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
