@@ -9,6 +9,8 @@ services:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: password
       MONGO_INITDB_DATABASE: stayease_booking
+    networks:
+      - stayease-network
     ports:
       - "27017:27017"
     volumes:
@@ -30,7 +32,7 @@ services:
       PORT: 3000
       MONGODB_URI: mongodb://admin:password@mongodb:27017/stayease_booking?authSource=admin
       MONGODB_DB_NAME: stayease_booking
-      AUTH_SERVICE_URL: http://auth-service:3001
+      AUTH_SERVICE_URL: http://host.docker.internal:3000
       HOTEL_SERVICE_URL: http://hotel-service:3002
       PAYMENT_SERVICE_URL: http://payment-service:3004
       JWT_SECRET: your_super_secret_jwt_key_change_this_in_production

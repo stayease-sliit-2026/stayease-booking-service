@@ -4,6 +4,7 @@ const logger = require('../config/logger');
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL;
 const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '30000');
 
+
 /**
  * Auth Middleware - Validates JWT token by calling Auth Service
  * All protected endpoints must use this middleware
