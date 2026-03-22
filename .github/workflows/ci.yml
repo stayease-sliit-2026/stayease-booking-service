@@ -212,7 +212,8 @@ jobs:
 
       - name: Skip Azure deployment
         if: steps.azure-check.outputs.can_deploy != 'true'
-        run: echo "Skipping deploy-azure: ${{ steps.azure-check.outputs.reason }}"
+        run: |
+          echo "Skipping deploy-azure: ${{ steps.azure-check.outputs.reason }}"
 
       - name: Azure Login
         if: steps.azure-check.outputs.can_deploy == 'true'
