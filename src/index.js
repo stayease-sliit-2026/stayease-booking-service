@@ -91,15 +91,19 @@ app.use((err, req, res, next) => {
  */
 const startServer = async () => {
   try {
-    // Connect to MongoDB
-    await connectDB();
-    logger.info('Database connection established');
-
-    // Start Express server
+    // Start Express server first (health check should work)
     app.listen(PORT, () => {
       logger.info(`🚀 Booking Service running on port ${PORT}`);
-      logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
+
+    // Connect to MongoDB asynchronously (non-blocking)
+    if (process.env.MONGODB_URI) {
+      connectDB().catch(err => {
+        logger.warn(`Database not available: ${err.message}. Service will continue without DB.`);
+      });
+    } else {
+      logger.warn('MONGODB_URI not set. Database features unavailable.');
+    }
   } catch (error) {
     logger.error(`Failed to start server: ${error.message}`);
     process.exit(1);

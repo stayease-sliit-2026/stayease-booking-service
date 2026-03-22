@@ -36,3 +36,6 @@ temp/
 
 # SonarCloud
 .scannerwork/
+
+# Local scripts
+scripts/*.sh

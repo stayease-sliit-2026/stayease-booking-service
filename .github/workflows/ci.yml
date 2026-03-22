@@ -1,5 +1,9 @@
 name: CI/CD Pipeline
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main, develop]
@@ -32,14 +36,7 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Cache node_modules
-        uses: actions/cache@v3
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+      # npm cache handled by setup-node 'cache: npm' above; avoid duplicate caching steps
 
   # Stage 2: Run Tests
   test:
@@ -61,7 +58,6 @@ jobs:
 
       - name: Run tests
         run: npm test -- --coverage
-        continue-on-error: true
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v3
@@ -96,7 +92,8 @@ jobs:
         continue-on-error: true
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        # pin to a stable major version
+        uses: SonarSource/sonarcloud-github-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -110,7 +107,8 @@ jobs:
   build-image:
     needs: [test, sonarcloud]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    # Only build/push images on push events and when registry credentials are present
+    if: github.event_name == 'push' && (secrets.ACR_LOGIN_SERVER != '' || secrets.DOCKER_USERNAME != '')
     
     permissions:
       contents: read
@@ -123,51 +121,78 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Log in to Azure Container Registry
+        if: secrets.ACR_LOGIN_SERVER != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Log in to Docker Hub (fallback)
+        if: secrets.ACR_LOGIN_SERVER == '' && secrets.DOCKER_USERNAME != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-        continue-on-error: true
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Set image variables
+        id: set-vars
+        run: |
+          IMAGE_TAG=${GITHUB_SHA}
+          if [ "${{ secrets.ACR_LOGIN_SERVER }}" != "" ]; then
+            IMAGE_FULL=${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+          else
+            IMAGE_FULL=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+          fi
+          echo "IMAGE_FULL=${IMAGE_FULL}" >> $GITHUB_ENV
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name == 'push' && secrets.DOCKER_USERNAME != '' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          tags: ${{ env.IMAGE_FULL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Stage 5: Deploy to Cloud (Optional - Configure as needed)
-  deploy:
+      - name: Expose image as job output
+        id: set-image
+        run: echo "image=${{ env.IMAGE_FULL }}" >> $GITHUB_OUTPUT
+
+    outputs:
+      image: ${{ steps.set-image.outputs.image }}
+  # Stage 5: Deploy to Azure (ACR -> App Service for Containers)
+  deploy-azure:
     needs: build-image
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
+    # only deploy from main branch and when Azure credentials are present
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.AZURE_CREDENTIALS != ''
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy to AWS ECS / Azure Container Apps
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy image to Azure Web App (set container)
+        env:
+          IMAGE: ${{ needs.build-image.outputs.image }}
         run: |
-          echo "Deployment step - Configure based on your cloud provider"
-          echo "For AWS ECS: Use AWS CLI to update service"
-          echo "For Azure: Use Azure CLI to update container app"
-        continue-on-error: true
+          echo "Deploying $IMAGE to Web App ${{ secrets.AZURE_WEBAPP_NAME }} in ${{ secrets.AZURE_RESOURCE_GROUP }}"
+          az webapp config container set \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --docker-custom-image-name $IMAGE \
+            --docker-registry-server-url https://${{ secrets.ACR_LOGIN_SERVER }} \
+            --docker-registry-server-user ${{ secrets.ACR_USERNAME }} \
+            --docker-registry-server-password ${{ secrets.ACR_PASSWORD }}
+
+      - name: Restart Web App
+        run: az webapp restart --name ${{ secrets.AZURE_WEBAPP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }}
 
   # Status Check
   status-check:
