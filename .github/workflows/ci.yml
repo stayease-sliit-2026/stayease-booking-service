@@ -107,8 +107,8 @@ jobs:
   build-image:
     needs: [test, sonarcloud]
     runs-on: ubuntu-latest
-    # Only build/push images on push events and when registry credentials are present
-    if: github.event_name == 'push' && (secrets.ACR_LOGIN_SERVER != '' || secrets.DOCKER_USERNAME != '')
+    # Build image only on push events.
+    if: github.event_name == 'push'
     
     permissions:
       contents: read
@@ -118,11 +118,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Determine registry mode
+        id: registry
+        run: |
+          if [ -n "${{ secrets.ACR_LOGIN_SERVER }}" ] && [ -n "${{ secrets.ACR_USERNAME }}" ] && [ -n "${{ secrets.ACR_PASSWORD }}" ]; then
+            echo "mode=acr" >> $GITHUB_OUTPUT
+          elif [ -n "${{ secrets.DOCKER_USERNAME }}" ] && [ -n "${{ secrets.DOCKER_PASSWORD }}" ]; then
+            echo "mode=dockerhub" >> $GITHUB_OUTPUT
+          else
+            echo "mode=none" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Azure Container Registry
-        if: secrets.ACR_LOGIN_SERVER != ''
+        if: steps.registry.outputs.mode == 'acr'
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ACR_LOGIN_SERVER }}
@@ -130,7 +141,7 @@ jobs:
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Log in to Docker Hub (fallback)
-        if: secrets.ACR_LOGIN_SERVER == '' && secrets.DOCKER_USERNAME != ''
+        if: steps.registry.outputs.mode == 'dockerhub'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -140,14 +151,21 @@ jobs:
         id: set-vars
         run: |
           IMAGE_TAG=${GITHUB_SHA}
-          if [ "${{ secrets.ACR_LOGIN_SERVER }}" != "" ]; then
+          if [ "${{ steps.registry.outputs.mode }}" = "acr" ]; then
             IMAGE_FULL=${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
-          else
+          elif [ "${{ steps.registry.outputs.mode }}" = "dockerhub" ]; then
             IMAGE_FULL=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+          else
+            IMAGE_FULL=
           fi
           echo "IMAGE_FULL=${IMAGE_FULL}" >> $GITHUB_ENV
 
+      - name: Skip image push when no registry credentials
+        if: steps.registry.outputs.mode == 'none'
+        run: echo "No ACR/Docker Hub credentials found. Skipping image build and push."
+
       - name: Build and push Docker image
+        if: steps.registry.outputs.mode != 'none'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -158,7 +176,12 @@ jobs:
 
       - name: Expose image as job output
         id: set-image
-        run: echo "image=${{ env.IMAGE_FULL }}" >> $GITHUB_OUTPUT
+        run: |
+          if [ -n "${{ env.IMAGE_FULL }}" ]; then
+            echo "image=${{ env.IMAGE_FULL }}" >> $GITHUB_OUTPUT
+          else
+            echo "image=" >> $GITHUB_OUTPUT
+          fi
 
     outputs:
       image: ${{ steps.set-image.outputs.image }}
@@ -166,19 +189,39 @@ jobs:
   deploy-azure:
     needs: build-image
     runs-on: ubuntu-latest
-    # only deploy from main branch and when Azure credentials are present
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.AZURE_CREDENTIALS != ''
+    # Only deploy from main branch on push events.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check Azure deployment prerequisites
+        id: azure-check
+        run: |
+          if [ -z "${{ needs.build-image.outputs.image }}" ]; then
+            echo "can_deploy=false" >> $GITHUB_OUTPUT
+            echo "reason=No built image output from build-image job" >> $GITHUB_OUTPUT
+          elif [ -z "${{ secrets.AZURE_CREDENTIALS }}" ] || [ -z "${{ secrets.AZURE_WEBAPP_NAME }}" ] || [ -z "${{ secrets.AZURE_RESOURCE_GROUP }}" ] || [ -z "${{ secrets.ACR_LOGIN_SERVER }}" ] || [ -z "${{ secrets.ACR_USERNAME }}" ] || [ -z "${{ secrets.ACR_PASSWORD }}" ]; then
+            echo "can_deploy=false" >> $GITHUB_OUTPUT
+            echo "reason=Missing one or more Azure/registry secrets" >> $GITHUB_OUTPUT
+          else
+            echo "can_deploy=true" >> $GITHUB_OUTPUT
+            echo "reason=ok" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip Azure deployment
+        if: steps.azure-check.outputs.can_deploy != 'true'
+        run: echo "Skipping deploy-azure: ${{ steps.azure-check.outputs.reason }}"
+
       - name: Azure Login
+        if: steps.azure-check.outputs.can_deploy == 'true'
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy image to Azure Web App (set container)
+        if: steps.azure-check.outputs.can_deploy == 'true'
         env:
           IMAGE: ${{ needs.build-image.outputs.image }}
         run: |
@@ -192,6 +235,7 @@ jobs:
             --docker-registry-server-password ${{ secrets.ACR_PASSWORD }}
 
       - name: Restart Web App
+        if: steps.azure-check.outputs.can_deploy == 'true'
         run: az webapp restart --name ${{ secrets.AZURE_WEBAPP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }}
 
   # Status Check
