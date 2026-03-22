@@ -110,8 +110,10 @@ const startServer = async () => {
   }
 };
 
-// Start the server
-startServer();
+// Start the server only outside of test runs.
+if (process.env.NODE_ENV !== 'test') {
+  startServer();
+}
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {

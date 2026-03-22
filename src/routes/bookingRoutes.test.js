@@ -1,7 +1,23 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
+const { MongoMemoryServer } = require('mongodb-memory-server');
 const app = require('../index');
 const Booking = require('../models/Booking');
+
+jest.mock('../middleware/auth', () => async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      error: true,
+      message: 'Missing or invalid authorization header',
+    });
+  }
+
+  req.user = { id: 'user123' };
+  req.token = authHeader.substring(7);
+  return next();
+});
 
 // Mock the external services
 jest.mock('../services/authService');
@@ -12,20 +28,31 @@ const AuthService = require('../services/authService');
 const HotelService = require('../services/hotelService');
 const PaymentService = require('../services/paymentService');
 
+let mongoServer;
+
 describe('Booking Routes - Integration Tests', () => {
   beforeAll(async () => {
-    // Connect to test database if needed
-    // For now we'll skip DB connection in tests
+    mongoServer = await MongoMemoryServer.create();
+    await mongoose.connect(mongoServer.getUri(), {
+      dbName: 'stayease_booking_test',
+    });
   });
 
   afterAll(async () => {
-    // Clean up
-    await mongoose.connection.close();
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.connection.close();
+    }
+
+    if (mongoServer) {
+      await mongoServer.stop();
+    }
   });
 
   afterEach(async () => {
-    // Clear all collections
-    await Booking.deleteMany({});
+    if (mongoose.connection.readyState === 1) {
+      await Booking.deleteMany({});
+    }
+
     jest.clearAllMocks();
   });
 
