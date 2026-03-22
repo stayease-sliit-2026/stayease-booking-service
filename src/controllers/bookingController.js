@@ -376,6 +376,18 @@ exports.checkAvailability = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error checking availability: ${error.message}`);
+
+    if (
+      (error.response && error.response.status === 404) ||
+      error.status === 404
+    ) {
+      return res.status(404).json({
+        error: true,
+        message: 'Hotel or room not found in hotel service',
+        details: error.message,
+      });
+    }
+
     res.status(500).json({
       error: true,
       message: 'Failed to check availability',

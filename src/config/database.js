@@ -3,17 +3,18 @@ const logger = require('./logger');
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      dbName: process.env.MONGODB_DB_NAME,
-    });
+    const options = {};
+    if (process.env.MONGODB_DB_NAME) {
+      options.dbName = process.env.MONGODB_DB_NAME;
+    }
+
+    const conn = await mongoose.connect(process.env.MONGODB_URI, options);
 
     logger.info(`MongoDB Connected: ${conn.connection.host}`);
     return conn;
   } catch (error) {
     logger.error(`Error connecting to MongoDB: ${error.message}`);
-    process.exit(1);
+    throw error;
   }
 };
 

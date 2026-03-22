@@ -8,6 +8,17 @@ const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '30000');
  * Service for communicating with Hotel Listing Service
  */
 class HotelService {
+  static async getRoomsForHotel(hotelId) {
+    const response = await axios.get(
+      `${HOTEL_SERVICE_URL}/hotels/${hotelId}/rooms`,
+      {
+        timeout: REQUEST_TIMEOUT,
+      }
+    );
+
+    return response.data;
+  }
+
   /**
    * Check if a room is available for the specified dates
    * @param {string} hotelId - Hotel ID
@@ -31,6 +42,35 @@ class HotelService {
 
       return response.data;
     } catch (error) {
+      // Fallback for hotel service variants that expose only /hotels/:hotelId/rooms.
+      if (error.response && error.response.status === 404) {
+        try {
+          const rooms = await this.getRoomsForHotel(hotelId);
+          const room = Array.isArray(rooms)
+            ? rooms.find((item) => String(item._id) === String(roomId))
+            : null;
+
+          if (!room) {
+            const notFoundError = new Error('Hotel or room not found in hotel service');
+            notFoundError.status = 404;
+            throw notFoundError;
+          }
+
+          return {
+            available: Boolean(room.isAvailable),
+            // Date range is not enforced by this fallback contract.
+            checkIn,
+            checkOut,
+            roomId,
+            hotelId,
+            source: 'rooms-list-fallback',
+          };
+        } catch (fallbackError) {
+          logger.error(`Failed fallback availability check: ${fallbackError.message}`);
+          throw fallbackError;
+        }
+      }
+
       logger.error(`Failed to check room availability: ${error.message}`);
       throw error;
     }
@@ -53,6 +93,21 @@ class HotelService {
 
       return response.data;
     } catch (error) {
+      if (error.response && error.response.status === 404) {
+        try {
+          const rooms = await this.getRoomsForHotel(hotelId);
+          const room = Array.isArray(rooms)
+            ? rooms.find((item) => String(item._id) === String(roomId))
+            : null;
+
+          if (room) {
+            return room;
+          }
+        } catch (fallbackError) {
+          logger.error(`Failed fallback room lookup: ${fallbackError.message}`);
+        }
+      }
+
       logger.error(`Failed to get room details: ${error.message}`);
       throw error;
     }
