@@ -185,7 +185,7 @@ jobs:
 
     outputs:
       image: ${{ steps.set-image.outputs.image }}
-  # Stage 5: Deploy to Azure (ACR -> App Service for Containers)
+  # Stage 5: Deploy to Azure Container Apps
   deploy-azure:
     needs: build-image
     runs-on: ubuntu-latest
@@ -202,9 +202,9 @@ jobs:
           if [ -z "${{ needs.build-image.outputs.image }}" ]; then
             echo "can_deploy=false" >> $GITHUB_OUTPUT
             echo "reason=No built image output from build-image job" >> $GITHUB_OUTPUT
-          elif [ -z "${{ secrets.AZURE_CREDENTIALS }}" ] || [ -z "${{ secrets.AZURE_WEBAPP_NAME }}" ] || [ -z "${{ secrets.AZURE_RESOURCE_GROUP }}" ] || [ -z "${{ secrets.ACR_LOGIN_SERVER }}" ] || [ -z "${{ secrets.ACR_USERNAME }}" ] || [ -z "${{ secrets.ACR_PASSWORD }}" ]; then
+          elif [ -z "${{ secrets.AZURE_CREDENTIALS }}" ] || [ -z "${{ secrets.AZURE_RESOURCE_GROUP }}" ] || [ -z "${{ secrets.AZURE_CONTAINERAPP_NAME }}" ]; then
             echo "can_deploy=false" >> $GITHUB_OUTPUT
-            echo "reason=Missing one or more Azure/registry secrets" >> $GITHUB_OUTPUT
+            echo "reason=Missing one or more Azure Container Apps secrets" >> $GITHUB_OUTPUT
           else
             echo "can_deploy=true" >> $GITHUB_OUTPUT
             echo "reason=ok" >> $GITHUB_OUTPUT
@@ -221,23 +221,23 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy image to Azure Web App (set container)
+      - name: Deploy image to Azure Container App
         if: steps.azure-check.outputs.can_deploy == 'true'
         env:
           IMAGE: ${{ needs.build-image.outputs.image }}
         run: |
-          echo "Deploying $IMAGE to Web App ${{ secrets.AZURE_WEBAPP_NAME }} in ${{ secrets.AZURE_RESOURCE_GROUP }}"
-          az webapp config container set \
-            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+          echo "Deploying $IMAGE to Container App ${{ secrets.AZURE_CONTAINERAPP_NAME }} in ${{ secrets.AZURE_RESOURCE_GROUP }}"
+          az extension add --name containerapp --upgrade --yes
+          az containerapp update \
+            --name ${{ secrets.AZURE_CONTAINERAPP_NAME }} \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --docker-custom-image-name $IMAGE \
-            --docker-registry-server-url https://${{ secrets.ACR_LOGIN_SERVER }} \
-            --docker-registry-server-user ${{ secrets.ACR_USERNAME }} \
-            --docker-registry-server-password ${{ secrets.ACR_PASSWORD }}
+            --image $IMAGE
 
-      - name: Restart Web App
+      - name: Show Container App URL
         if: steps.azure-check.outputs.can_deploy == 'true'
-        run: az webapp restart --name ${{ secrets.AZURE_WEBAPP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }}
+        run: |
+          FQDN=$(az containerapp show --name ${{ secrets.AZURE_CONTAINERAPP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Container App URL: https://${FQDN}"
 
   # Status Check
   status-check:
