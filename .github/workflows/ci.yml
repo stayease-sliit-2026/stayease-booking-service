@@ -15,6 +15,7 @@ env:
   IMAGE_NAME: stayease/booking-service
   SONAR_ORG: stayease-sliit-2026
   SONAR_PROJECT: stayease-booking-service
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # Stage 1: Checkout and Install
@@ -26,10 +27,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -45,10 +46,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.19.0
           cache: 'npm'
@@ -60,7 +61,7 @@ jobs:
         run: npm test -- --coverage
 
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
           files: ./coverage/lcov.info
           flags: unittests
@@ -74,12 +75,12 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.19.0
           cache: 'npm'
@@ -92,10 +93,8 @@ jobs:
         continue-on-error: true
 
       - name: SonarCloud Scan
-        # pin to a stable major version
-        uses: SonarSource/sonarcloud-github-action@v1
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
@@ -116,7 +115,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Determine registry mode
         id: registry
@@ -194,7 +193,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check Azure deployment prerequisites
         id: azure-check
